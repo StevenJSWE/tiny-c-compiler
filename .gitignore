@@ -1,0 +1,10 @@
+# Rust compilation artifacts
+/target/
+
+# C compilation artifacts
+*.o
+*.out
+*.exe
+
+# macOS specific
+.DS_Store
