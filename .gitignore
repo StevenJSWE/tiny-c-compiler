@@ -1,6 +1,5 @@
 # Rust compilation artifacts
-/target/
-
+**/target/
 # C compilation artifacts
 *.o
 *.out
