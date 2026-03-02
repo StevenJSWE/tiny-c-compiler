@@ -1,4 +1,4 @@
-#[derive(Debug, PartialEq)]// This lets us print and compare our tokens later!
+#[derive(Debug, PartialEq, Clone)]// This lets us print and compare our tokens later!
 pub enum Token{
     // We will list our token types here
     Keyword(String),
@@ -10,14 +10,26 @@ pub enum Token{
 
 }
 
-struct Lexer{
+#[derive(Debug)]
+pub enum Expr{
+    Number(i32),
+    //Addition has a left side and a right side
+    Add(Box<Expr>, Box<Expr>),
+}
+
+#[derive(Debug)]
+pub enum Statement{
+    // "Let" represents variable assignment: Target Name and the Expressioin being assigned
+    Let(String, Expr),
+}
+pub struct Lexer{
     input: String,
     position: usize,
 }
 
 impl Lexer {
     fn new(input: String) -> Self{ 
-        Lexer { input, position: 0}
+        Lexer {input, position: 0}
     }
 
     // Helper to grab the character at our current position 
@@ -113,22 +125,155 @@ impl Lexer {
         Some(token)
     }
 }
+
+
+pub struct Parser{
+    lexer: Lexer,
+    current_token: Option<Token>,
+}
+
+impl Parser{
+    //Start the parser by pulling the very first token 
+    pub fn new(mut lexer: Lexer) -> Self{
+        let first_token = lexer.next_token();
+        Parser { lexer,
+             current_token: first_token,
+          }
+    }
+
+    // Helper to step forward in our token stream
+    fn advance(&mut self){
+        self.current_token = self.lexer.next_token();
+    }
+
+    // Parses: int x = <expression>;
+    pub fn parse_statement(&mut self) -> Option<Statement> {
+        // 1. Look for the 'int' keyword
+        if let Some(Token::Keyword(kw)) = &self.current_token {
+            if kw == "int" {
+                self.advance(); // Consume 'int'
+
+                // 2. Look for the variable name (e.g, 'x')
+                if let Some(Token::Identifier(name)) = self.current_token.clone() {
+                    self.advance(); // Consume 'x'
+                
+                    // 3. Look for the '=' symbol (Notice this is now inside the block above!)
+                    if let Some(Token::Assign) = self.current_token {
+                        self.advance(); // Consume '='
+
+                        // 4. Hand off to our expression parser for the right side
+                        let expr = self.parse_expression().unwrap();
+
+                        // 5. Look for the ';'
+                        if let Some(Token::Semicolon) = self.current_token {
+                            self.advance(); // Consume ';'
+
+                            // Now 'name' is still alive here to be used!
+                            return Some(Statement::Let(name, expr));
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    fn parse_expression(&mut self) -> Option<Expr> {
+        // Grab the first number
+        if let Some(Token::Number(val1)) = self.current_token{
+            self.advance();
+
+            // Check if a '+' comes next
+            if let Some(Token::Plus) = self.current_token{
+                self.advance();
+
+                // Grab the second number
+                if let Some(Token::Number(val2)) = self.current_token{
+                    self.advance();
+
+                    return Some(Expr::Add(
+                        Box::new(Expr::Number(val1)),
+                        Box::new(Expr::Number(val2))
+                ));
+                }
+            } else {
+
+                return Some(Expr::Number(val1));
+            }
+        }
+        None
+    }
+}
+
+pub struct CodeGenerator{
+    pub assembly: String,
+}
+
+impl CodeGenerator{
+    pub fn new() -> Self{
+        CodeGenerator {
+            assembly: String::new(),
+         }
+    }
+
+    pub fn generate_expr(&mut self, expr: &Expr, target_reg: usize) {
+        match expr { 
+            Expr::Number(val) => {
+                // 🛠️ The first {} is the register, the second {} is the value
+                let instruction = format!("mov w{}, #{}\n", target_reg, val);
+                self.assembly.push_str(&instruction);
+            }
+            Expr::Add(left, right) => {
+                // 🛠️ Generate left side into the current register
+                self.generate_expr(left, target_reg);
+                
+                // 🛠️ Generate right side into the NEXT register (+1)
+                self.generate_expr(right, target_reg + 1);
+                
+                // 🛠️ Add them! format: add result_reg, left_reg, right_reg
+                let instruction = format!("add w{}, w{}, w{}\n", target_reg, target_reg, target_reg + 1);
+                self.assembly.push_str(&instruction);
+            }
+        }
+    }
+
+
+}
 fn main() {
 
-    // The C code we want to compile 
+// The C code we want to compile 
 
-let source_code = String::from("int x = 5;");
+let source_code = String::from("int x = 5 + 3;");
 
-//Create a new instance of our lexer 
-let mut lexer = Lexer::new(source_code);
+// Create a new instance of our lexer 
+let lexer = Lexer::new(source_code);
+
+// Pass the lexer int our new parser
+let mut parser = Parser::new(lexer);
 
 print!("Scanning code...");
 
 // Keep publishing tokens until next_token() returns NONE
 
-while let Some(token) = lexer.next_token(){
-    //The {:?} syntax tells Rust to use the Debug format we derived on our enum 
-    println!("{:?}", token);
+if let Some(ast) = parser.parse_statement() {
+    // The {:?} syntax tells Rust to use the Debug format we derived on our enum 
+    println!("{:?}", ast);
+
+    // Create out code generator
+    let mut generator = CodeGenerator::new();
+
+    // Unpack the math expression from our 'Let' statement
+    if let Statement::Let(_name, expr) = ast{
+
+        // Generate the assembly, telling it to start at register 0
+        generator.generate_expr(&expr, 0);
+
+        println!("\nGenerated Assembly:");
+        println!("{}", generator.assembly);
+        
+    } 
+} else {
+    println!("Syntax error: Failed to parse.")
 }
 
 println!("Done!");
